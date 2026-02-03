@@ -221,25 +221,40 @@ async def on_message(message: discord.Message):
         except Exception as e:
             logger.warning(f"Failed to fetch referenced message: {e}")
 
-    # Check if message has image attachments with text and mentions the bot -> edit mode
+    # Check if message has image attachments with text -> edit mode
+    # In DMs, no need to tag the bot; in guilds, require a mention
     image_attachments = [a for a in message.attachments if a.content_type and a.content_type.startswith("image/")]
+    is_dm = guild_id is None
 
-    if image_attachments and message.content.strip() and bot.user.mentioned_in(message):
-        # Remove the bot mention from the prompt
+    if image_attachments and message.content.strip() and (is_dm or bot.user.mentioned_in(message)):
+        # Remove the bot mention from the prompt (if present)
         prompt = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+        # If prompt starts with "draw ", strip it (same syntax as generate, but with image = edit)
+        if prompt.lower().startswith("draw "):
+            prompt = prompt[5:].strip()
         if prompt:
             logger.info(f"Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={prompt[:50]}...")
             await handle_edit_message(message, image_attachments, prompt)
             return
 
     # Check for "draw [prompt]" pattern
+    # In DMs, no need to tag the bot; in guilds, require a mention for draw command
     content_lower = message.content.lower().strip()
-    if content_lower.startswith("draw "):
-        prompt = message.content.strip()[5:].strip()  # Get everything after "draw "
-        if prompt:
-            logger.info(f"Draw request from {message.author} in {guild_name}/#{channel_name}: {prompt[:50]}...")
-            await handle_generate_message(message, prompt)
-            return
+    # Remove bot mention for checking the pattern
+    content_for_check = content_lower.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+
+    if content_for_check.startswith("draw "):
+        if is_dm or bot.user.mentioned_in(message):
+            prompt = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()[5:].strip()
+            if prompt:
+                # If image attachments present, treat as edit request
+                if image_attachments:
+                    logger.info(f"Draw+Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={prompt[:50]}...")
+                    await handle_edit_message(message, image_attachments, prompt)
+                else:
+                    logger.info(f"Draw request from {message.author} in {guild_name}/#{channel_name}: {prompt[:50]}...")
+                    await handle_generate_message(message, prompt)
+                return
 
     # Process other commands
     await bot.process_commands(message)
