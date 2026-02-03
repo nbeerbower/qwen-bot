@@ -27,6 +27,9 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 ALLOWED_GUILDS = [int(x.strip()) for x in os.getenv("ALLOWED_GUILDS", "").split(",") if x.strip()]
 ALLOWED_CHANNELS = [int(x.strip()) for x in os.getenv("ALLOWED_CHANNELS", "").split(",") if x.strip()]
 
+# DM restrictions (comma-separated user IDs, empty = no DMs allowed)
+ALLOWED_DMS = [int(x.strip()) for x in os.getenv("ALLOWED_DMS", "").split(",") if x.strip()]
+
 # Job timeout in seconds
 JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1000"))
 
@@ -41,20 +44,30 @@ MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "1024"))
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
 logger.info(f"ALLOWED_GUILDS: {ALLOWED_GUILDS if ALLOWED_GUILDS else 'all'}")
 logger.info(f"ALLOWED_CHANNELS: {ALLOWED_CHANNELS if ALLOWED_CHANNELS else 'all'}")
+logger.info(f"ALLOWED_DMS: {ALLOWED_DMS if ALLOWED_DMS else 'none'}")
 logger.info(f"JOB_TIMEOUT: {JOB_TIMEOUT}s")
 logger.info(f"DEFAULT_GENERATION_STEPS: {DEFAULT_GENERATION_STEPS}")
 logger.info(f"DEFAULT_EDIT_STEPS: {DEFAULT_EDIT_STEPS}")
 logger.info(f"MAX_IMAGE_DIMENSION: {MAX_IMAGE_DIMENSION}")
 
 
-def is_allowed(guild_id: int | None, channel_id: int | None) -> bool:
-    """Check if the bot is allowed to respond in this guild/channel."""
+def is_allowed(guild_id: int | None, channel_id: int | None, user_id: int | None = None) -> bool:
+    """Check if the bot is allowed to respond in this guild/channel/DM."""
+    # Handle DMs (guild_id is None)
+    if guild_id is None:
+        # DMs are only allowed for users in ALLOWED_DMS list
+        if user_id is not None and user_id in ALLOWED_DMS:
+            logger.debug(f"DM allowed for user {user_id}")
+            return True
+        logger.debug(f"DM rejected for user {user_id} (not in ALLOWED_DMS)")
+        return False
+
     # Check guild restriction
-    if ALLOWED_GUILDS and (guild_id is None or guild_id not in ALLOWED_GUILDS):
+    if ALLOWED_GUILDS and guild_id not in ALLOWED_GUILDS:
         logger.debug(f"Guild {guild_id} not in allowed list")
         return False
     # Check channel restriction
-    if ALLOWED_CHANNELS and (channel_id is None or channel_id not in ALLOWED_CHANNELS):
+    if ALLOWED_CHANNELS and channel_id not in ALLOWED_CHANNELS:
         logger.debug(f"Channel {channel_id} not in allowed list")
         return False
     return True
@@ -185,7 +198,7 @@ async def on_message(message: discord.Message):
     guild_name = message.guild.name if message.guild else "DM"
     channel_name = getattr(message.channel, 'name', 'DM')
 
-    if not is_allowed(guild_id, message.channel.id):
+    if not is_allowed(guild_id, message.channel.id, message.author.id):
         logger.debug(f"Ignoring message from {message.author} in {guild_name}/#{channel_name} (not allowed)")
         return
 
@@ -454,7 +467,7 @@ async def generate(
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
-    if not is_allowed(guild_id, channel_id):
+    if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/generate blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
@@ -539,7 +552,7 @@ async def edit(
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
-    if not is_allowed(guild_id, channel_id):
+    if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/edit blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
@@ -625,7 +638,7 @@ async def status(interaction: discord.Interaction, job_id: str):
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
-    if not is_allowed(guild_id, channel_id):
+    if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/status blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
@@ -676,7 +689,7 @@ async def queue(interaction: discord.Interaction):
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
-    if not is_allowed(guild_id, channel_id):
+    if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/queue blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
@@ -720,7 +733,7 @@ async def system(interaction: discord.Interaction):
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
-    if not is_allowed(guild_id, channel_id):
+    if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/system blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
