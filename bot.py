@@ -65,7 +65,7 @@ async def poll_job_status(session: aiohttp.ClientSession, job_id: str, timeout: 
         timeout = JOB_TIMEOUT
     """Poll for job completion with timeout."""
     logger.info(f"[{job_id}] Starting to poll job status (timeout={timeout}s)")
-    start_time = asyncio.get_event_loop().time()
+    processing_start_time = None  # Only set when job starts processing
     poll_count = 0
     while True:
         poll_count += 1
@@ -80,18 +80,27 @@ async def poll_job_status(session: aiohttp.ClientSession, job_id: str, timeout: 
             logger.debug(f"[{job_id}] Poll #{poll_count}: status={status}, progress={progress}")
 
             if status == "completed":
-                elapsed = asyncio.get_event_loop().time() - start_time
-                logger.info(f"[{job_id}] Job completed in {elapsed:.1f}s after {poll_count} polls")
+                if processing_start_time:
+                    elapsed = asyncio.get_event_loop().time() - processing_start_time
+                    logger.info(f"[{job_id}] Job completed in {elapsed:.1f}s processing time after {poll_count} polls")
+                else:
+                    logger.info(f"[{job_id}] Job completed after {poll_count} polls")
                 return data
             elif status == "failed":
                 error = data.get("error", "Job failed")
                 logger.error(f"[{job_id}] Job failed: {error}")
                 raise Exception(error)
+            elif status != "queued" and processing_start_time is None:
+                # Job has started processing (not queued anymore)
+                processing_start_time = asyncio.get_event_loop().time()
+                logger.info(f"[{job_id}] Job started processing")
 
-            elapsed = asyncio.get_event_loop().time() - start_time
-            if elapsed > timeout:
-                logger.error(f"[{job_id}] Job timed out after {elapsed:.1f}s")
-                raise Exception("Job timed out")
+            # Only apply timeout once processing has started
+            if processing_start_time is not None:
+                elapsed = asyncio.get_event_loop().time() - processing_start_time
+                if elapsed > timeout:
+                    logger.error(f"[{job_id}] Job timed out after {elapsed:.1f}s of processing")
+                    raise Exception("Job timed out")
 
             await asyncio.sleep(2)
 
