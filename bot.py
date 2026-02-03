@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import aiohttp
 import discord
 from discord import app_commands
@@ -9,6 +10,15 @@ from io import BytesIO
 
 load_dotenv()
 
+# Setup logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("qwen-bot")
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
@@ -16,14 +26,21 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 ALLOWED_GUILDS = [int(x.strip()) for x in os.getenv("ALLOWED_GUILDS", "").split(",") if x.strip()]
 ALLOWED_CHANNELS = [int(x.strip()) for x in os.getenv("ALLOWED_CHANNELS", "").split(",") if x.strip()]
 
+# Log config on startup
+logger.info(f"API_BASE_URL: {API_BASE_URL}")
+logger.info(f"ALLOWED_GUILDS: {ALLOWED_GUILDS if ALLOWED_GUILDS else 'all'}")
+logger.info(f"ALLOWED_CHANNELS: {ALLOWED_CHANNELS if ALLOWED_CHANNELS else 'all'}")
+
 
 def is_allowed(guild_id: int | None, channel_id: int | None) -> bool:
     """Check if the bot is allowed to respond in this guild/channel."""
     # Check guild restriction
     if ALLOWED_GUILDS and (guild_id is None or guild_id not in ALLOWED_GUILDS):
+        logger.debug(f"Guild {guild_id} not in allowed list")
         return False
     # Check channel restriction
     if ALLOWED_CHANNELS and (channel_id is None or channel_id not in ALLOWED_CHANNELS):
+        logger.debug(f"Channel {channel_id} not in allowed list")
         return False
     return True
 
@@ -35,20 +52,33 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 async def poll_job_status(session: aiohttp.ClientSession, job_id: str, timeout: int = 300) -> dict:
     """Poll for job completion with timeout."""
+    logger.info(f"[{job_id}] Starting to poll job status (timeout={timeout}s)")
     start_time = asyncio.get_event_loop().time()
+    poll_count = 0
     while True:
+        poll_count += 1
         async with session.get(f"{API_BASE_URL}/status/{job_id}") as resp:
             if resp.status != 200:
+                logger.error(f"[{job_id}] Failed to get job status: HTTP {resp.status}")
                 raise Exception(f"Failed to get job status: {resp.status}")
             data = await resp.json()
 
-            if data["status"] == "completed":
+            status = data["status"]
+            progress = data.get("progress")
+            logger.debug(f"[{job_id}] Poll #{poll_count}: status={status}, progress={progress}")
+
+            if status == "completed":
+                elapsed = asyncio.get_event_loop().time() - start_time
+                logger.info(f"[{job_id}] Job completed in {elapsed:.1f}s after {poll_count} polls")
                 return data
-            elif data["status"] == "failed":
-                raise Exception(data.get("error", "Job failed"))
+            elif status == "failed":
+                error = data.get("error", "Job failed")
+                logger.error(f"[{job_id}] Job failed: {error}")
+                raise Exception(error)
 
             elapsed = asyncio.get_event_loop().time() - start_time
             if elapsed > timeout:
+                logger.error(f"[{job_id}] Job timed out after {elapsed:.1f}s")
                 raise Exception("Job timed out")
 
             await asyncio.sleep(2)
@@ -57,20 +87,27 @@ async def poll_job_status(session: aiohttp.ClientSession, job_id: str, timeout: 
 async def download_image(session: aiohttp.ClientSession, image_url: str) -> bytes:
     """Download image from API server."""
     full_url = f"{API_BASE_URL}{image_url}"
+    logger.debug(f"Downloading image from {full_url}")
     async with session.get(full_url) as resp:
         if resp.status != 200:
+            logger.error(f"Failed to download image: HTTP {resp.status}")
             raise Exception(f"Failed to download image: {resp.status}")
-        return await resp.read()
+        data = await resp.read()
+        logger.debug(f"Downloaded image: {len(data)} bytes")
+        return data
 
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    logger.info(f"Connected to {len(bot.guilds)} guild(s)")
+    for guild in bot.guilds:
+        logger.info(f"  - {guild.name} (ID: {guild.id})")
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
+        logger.info(f"Synced {len(synced)} slash command(s)")
     except Exception as e:
-        print(f"Failed to sync commands: {e}")
+        logger.error(f"Failed to sync commands: {e}")
 
 
 @bot.event
@@ -81,13 +118,18 @@ async def on_message(message: discord.Message):
 
     # Check server/channel restrictions
     guild_id = message.guild.id if message.guild else None
+    guild_name = message.guild.name if message.guild else "DM"
+    channel_name = getattr(message.channel, 'name', 'DM')
+
     if not is_allowed(guild_id, message.channel.id):
+        logger.debug(f"Ignoring message from {message.author} in {guild_name}/#{channel_name} (not allowed)")
         return
 
     # Check if message has image attachments with text -> edit mode
     image_attachments = [a for a in message.attachments if a.content_type and a.content_type.startswith("image/")]
 
     if image_attachments and message.content.strip():
+        logger.info(f"Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={message.content.strip()[:50]}...")
         await handle_edit_message(message, image_attachments, message.content.strip())
         return
 
@@ -96,6 +138,7 @@ async def on_message(message: discord.Message):
     if content_lower.startswith("draw "):
         prompt = message.content.strip()[5:].strip()  # Get everything after "draw "
         if prompt:
+            logger.info(f"Draw request from {message.author} in {guild_name}/#{channel_name}: {prompt[:50]}...")
             await handle_generate_message(message, prompt)
             return
 
@@ -120,15 +163,19 @@ async def handle_generate_message(message: discord.Message, prompt: str):
                 "seed": None
             }
 
+            logger.debug(f"Submitting generate job to API: {payload}")
             async with session.post(f"{API_BASE_URL}/generate", json=payload) as resp:
                 if resp.status == 503:
+                    logger.warning("Generation pipeline unavailable (503)")
                     await reply.edit(content="Sorry, the generation pipeline is not available right now.")
                     return
                 if resp.status != 200:
+                    logger.error(f"Failed to submit generate job: HTTP {resp.status}")
                     await reply.edit(content=f"Failed to submit job: {resp.status}")
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
+                logger.info(f"[{job_id}] Generate job submitted for user {message.author}")
 
             # Poll for completion
             result = await poll_job_status(session, job_id)
@@ -143,8 +190,10 @@ async def handle_generate_message(message: discord.Message, prompt: str):
                 file=file,
                 reference=message
             )
+            logger.info(f"[{job_id}] Delivered generated image to {message.author}")
 
     except Exception as e:
+        logger.error(f"Generate request failed for {message.author}: {e}", exc_info=True)
         await message.channel.send(
             content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
             reference=message
@@ -160,7 +209,9 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
         async with aiohttp.ClientSession() as session:
             # Use the first image attachment
             attachment = attachments[0]
+            logger.debug(f"Downloading attachment: {attachment.filename} ({attachment.content_type})")
             image_data = await attachment.read()
+            logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
 
             # Prepare multipart form data
             form = aiohttp.FormData()
@@ -170,19 +221,25 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
             form.add_field("num_inference_steps", "50")
             form.add_field("cfg_scale", "4.0")
 
+            logger.debug(f"Submitting edit job to API")
             async with session.post(f"{API_BASE_URL}/edit", data=form) as resp:
                 if resp.status == 503:
+                    logger.warning("Edit pipeline unavailable (503)")
                     await reply.edit(content="Sorry, the edit pipeline is not available right now.")
                     return
                 if resp.status == 400:
                     error_data = await resp.json()
-                    await reply.edit(content=f"Invalid request: {error_data.get('detail', 'Unknown error')}")
+                    error_detail = error_data.get('detail', 'Unknown error')
+                    logger.warning(f"Edit request rejected (400): {error_detail}")
+                    await reply.edit(content=f"Invalid request: {error_detail}")
                     return
                 if resp.status != 200:
+                    logger.error(f"Failed to submit edit job: HTTP {resp.status}")
                     await reply.edit(content=f"Failed to submit job: {resp.status}")
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
+                logger.info(f"[{job_id}] Edit job submitted for user {message.author}")
 
             # Poll for completion
             result = await poll_job_status(session, job_id, timeout=600)
@@ -197,8 +254,10 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
                 file=file,
                 reference=message
             )
+            logger.info(f"[{job_id}] Delivered edited image to {message.author}")
 
     except Exception as e:
+        logger.error(f"Edit request failed for {message.author}: {e}", exc_info=True)
         await message.channel.send(
             content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
             reference=message
@@ -225,12 +284,18 @@ async def generate(
     cfg: float = 4.0,
     seed: int = None
 ):
+    guild_name = interaction.guild.name if interaction.guild else "DM"
+    channel_name = getattr(interaction.channel, 'name', 'DM')
+    user = interaction.user
+
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
     if not is_allowed(guild_id, channel_id):
+        logger.info(f"/generate blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
 
+    logger.info(f"/generate from {user} in {guild_name}/#{channel_name}: prompt={prompt[:50]}..., size={width}x{height}, steps={steps}")
     await interaction.response.defer(thinking=True)
 
     try:
@@ -246,15 +311,19 @@ async def generate(
                 "seed": seed
             }
 
+            logger.debug(f"Submitting generate job to API: {payload}")
             async with session.post(f"{API_BASE_URL}/generate", json=payload) as resp:
                 if resp.status == 503:
+                    logger.warning(f"Generation pipeline unavailable (503) for {user}")
                     await interaction.followup.send("Generation pipeline is not available.")
                     return
                 if resp.status != 200:
+                    logger.error(f"Failed to submit generate job: HTTP {resp.status}")
                     await interaction.followup.send(f"Failed to submit job: {resp.status}")
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
+                logger.info(f"[{job_id}] Generate job submitted for {user}")
 
             await interaction.followup.send(f"Generating image... (Job ID: `{job_id}`)")
 
@@ -275,8 +344,10 @@ async def generate(
             embed.set_image(url="attachment://generated.png")
 
             await interaction.channel.send(embed=embed, file=file)
+            logger.info(f"[{job_id}] Delivered generated image to {user}")
 
     except Exception as e:
+        logger.error(f"/generate failed for {user}: {e}", exc_info=True)
         await interaction.followup.send(f"Error: {str(e)}")
 
 
@@ -298,23 +369,32 @@ async def edit(
     cfg: float = 4.0,
     seed: int = None
 ):
+    guild_name = interaction.guild.name if interaction.guild else "DM"
+    channel_name = getattr(interaction.channel, 'name', 'DM')
+    user = interaction.user
+
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
     if not is_allowed(guild_id, channel_id):
+        logger.info(f"/edit blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
 
+    logger.info(f"/edit from {user} in {guild_name}/#{channel_name}: image={image.filename}, prompt={prompt[:50]}...")
     await interaction.response.defer(thinking=True)
 
     # Validate attachment is an image
     if not image.content_type or not image.content_type.startswith("image/"):
+        logger.warning(f"/edit from {user}: invalid attachment type {image.content_type}")
         await interaction.followup.send("Please attach a valid image file.")
         return
 
     try:
         async with aiohttp.ClientSession() as session:
             # Download the attachment
+            logger.debug(f"Downloading attachment: {image.filename} ({image.content_type})")
             image_data = await image.read()
+            logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
 
             # Prepare multipart form data
             form = aiohttp.FormData()
@@ -326,19 +406,25 @@ async def edit(
             if seed is not None:
                 form.add_field("seed", str(seed))
 
+            logger.debug(f"Submitting edit job to API")
             async with session.post(f"{API_BASE_URL}/edit", data=form) as resp:
                 if resp.status == 503:
+                    logger.warning(f"Edit pipeline unavailable (503) for {user}")
                     await interaction.followup.send("Edit pipeline is not available.")
                     return
                 if resp.status == 400:
                     error_data = await resp.json()
-                    await interaction.followup.send(f"Invalid request: {error_data.get('detail', 'Unknown error')}")
+                    error_detail = error_data.get('detail', 'Unknown error')
+                    logger.warning(f"/edit request rejected (400) for {user}: {error_detail}")
+                    await interaction.followup.send(f"Invalid request: {error_detail}")
                     return
                 if resp.status != 200:
+                    logger.error(f"Failed to submit edit job: HTTP {resp.status}")
                     await interaction.followup.send(f"Failed to submit job: {resp.status}")
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
+                logger.info(f"[{job_id}] Edit job submitted for {user}")
 
             await interaction.followup.send(f"Editing image... (Job ID: `{job_id}`)")
 
@@ -356,32 +442,43 @@ async def edit(
             embed.set_image(url="attachment://edited.png")
 
             await interaction.channel.send(embed=embed, file=file)
+            logger.info(f"[{job_id}] Delivered edited image to {user}")
 
     except Exception as e:
+        logger.error(f"/edit failed for {user}: {e}", exc_info=True)
         await interaction.followup.send(f"Error: {str(e)}")
 
 
 @bot.tree.command(name="status", description="Check the status of a job")
 @app_commands.describe(job_id="The job ID to check")
 async def status(interaction: discord.Interaction, job_id: str):
+    user = interaction.user
+    guild_name = interaction.guild.name if interaction.guild else "DM"
+    channel_name = getattr(interaction.channel, 'name', 'DM')
+
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
     if not is_allowed(guild_id, channel_id):
+        logger.info(f"/status blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
 
+    logger.info(f"/status from {user}: job_id={job_id}")
     await interaction.response.defer(ephemeral=True)
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{API_BASE_URL}/status/{job_id}") as resp:
                 if resp.status == 404:
+                    logger.debug(f"/status: job {job_id} not found")
                     await interaction.followup.send("Job not found.", ephemeral=True)
                     return
                 if resp.status != 200:
+                    logger.error(f"/status: failed to get job {job_id}: HTTP {resp.status}")
                     await interaction.followup.send(f"Failed to get status: {resp.status}", ephemeral=True)
                     return
                 data = await resp.json()
+                logger.debug(f"/status: job {job_id} status={data['status']}")
 
         embed = discord.Embed(title=f"Job Status: {job_id[:8]}...", color=0xffaa00)
         embed.add_field(name="Type", value=data.get("job_type", "unknown"), inline=True)
@@ -400,26 +497,35 @@ async def status(interaction: discord.Interaction, job_id: str):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
+        logger.error(f"/status failed for {user}: {e}", exc_info=True)
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
 
 @bot.tree.command(name="queue", description="Show the current job queue status")
 async def queue(interaction: discord.Interaction):
+    user = interaction.user
+    guild_name = interaction.guild.name if interaction.guild else "DM"
+    channel_name = getattr(interaction.channel, 'name', 'DM')
+
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
     if not is_allowed(guild_id, channel_id):
+        logger.info(f"/queue blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
 
+    logger.info(f"/queue from {user} in {guild_name}/#{channel_name}")
     await interaction.response.defer(ephemeral=True)
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{API_BASE_URL}/queue") as resp:
                 if resp.status != 200:
+                    logger.error(f"/queue: failed to get queue info: HTTP {resp.status}")
                     await interaction.followup.send(f"Failed to get queue info: {resp.status}", ephemeral=True)
                     return
                 data = await resp.json()
+                logger.debug(f"/queue: queue_size={data.get('queue_size')}, total={data.get('total_jobs')}")
 
         embed = discord.Embed(title="Queue Status", color=0x9900ff)
         embed.add_field(name="Queue Size", value=str(data.get("queue_size", 0)), inline=True)
@@ -435,26 +541,35 @@ async def queue(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
+        logger.error(f"/queue failed for {user}: {e}", exc_info=True)
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
 
 @bot.tree.command(name="system", description="Show system information")
 async def system(interaction: discord.Interaction):
+    user = interaction.user
+    guild_name = interaction.guild.name if interaction.guild else "DM"
+    channel_name = getattr(interaction.channel, 'name', 'DM')
+
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
     if not is_allowed(guild_id, channel_id):
+        logger.info(f"/system blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
         await interaction.response.send_message("This command is not available here.", ephemeral=True)
         return
 
+    logger.info(f"/system from {user} in {guild_name}/#{channel_name}")
     await interaction.response.defer(ephemeral=True)
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{API_BASE_URL}/system/info") as resp:
                 if resp.status != 200:
+                    logger.error(f"/system: failed to get system info: HTTP {resp.status}")
                     await interaction.followup.send(f"Failed to get system info: {resp.status}", ephemeral=True)
                     return
                 data = await resp.json()
+                logger.debug(f"/system: device={data.get('device')}, gpu={data.get('gpu_name')}")
 
         embed = discord.Embed(title="System Information", color=0x00ffaa)
         embed.add_field(name="Device", value=data.get("device", "unknown"), inline=True)
@@ -475,13 +590,15 @@ async def system(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
+        logger.error(f"/system failed for {user}: {e}", exc_info=True)
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
-        print("Error: DISCORD_TOKEN environment variable not set")
-        print("Create a .env file with DISCORD_TOKEN=your_token_here")
+        logger.error("DISCORD_TOKEN environment variable not set")
+        logger.error("Create a .env file with DISCORD_TOKEN=your_token_here")
         exit(1)
 
-    bot.run(DISCORD_TOKEN)
+    logger.info("Starting bot...")
+    bot.run(DISCORD_TOKEN, log_handler=None)  # Disable default discord.py handler
