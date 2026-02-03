@@ -164,7 +164,7 @@ async def handle_generate_message(message: discord.Message, prompt: str):
                 "negative_prompt": "",
                 "width": 512,
                 "height": 512,
-                "num_inference_steps": 20,
+                "num_inference_steps": 8,
                 "cfg_scale": 4.0,
                 "seed": None
             }
@@ -224,7 +224,7 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
             form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
             form.add_field("prompt", prompt)
             form.add_field("negative_prompt", "")
-            form.add_field("num_inference_steps", "50")
+            form.add_field("num_inference_steps", "8")
             form.add_field("cfg_scale", "4.0")
 
             logger.debug(f"Submitting edit job to API")
@@ -276,7 +276,7 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
     negative_prompt="What to avoid in the image",
     width="Image width (default: 512)",
     height="Image height (default: 512)",
-    steps="Number of inference steps (default: 20)",
+    steps="Number of inference steps (default: 8)",
     cfg="CFG scale (default: 4.0)",
     seed="Random seed for reproducibility"
 )
@@ -286,7 +286,7 @@ async def generate(
     negative_prompt: str = "",
     width: int = 512,
     height: int = 512,
-    steps: int = 20,
+    steps: int = 8,
     cfg: float = 4.0,
     seed: int = None
 ):
@@ -362,7 +362,7 @@ async def generate(
     image="The image to edit",
     prompt="Instructions for how to edit the image",
     negative_prompt="What to avoid in the edit",
-    steps="Number of inference steps (default: 50)",
+    steps="Number of inference steps (default: 8)",
     cfg="CFG scale (default: 4.0)",
     seed="Random seed for reproducibility"
 )
@@ -371,7 +371,7 @@ async def edit(
     image: discord.Attachment,
     prompt: str,
     negative_prompt: str = "",
-    steps: int = 50,
+    steps: int = 8,
     cfg: float = 4.0,
     seed: int = None
 ):
