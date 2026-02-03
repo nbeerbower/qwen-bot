@@ -12,6 +12,7 @@ env/
 .venv/
 
 # IDE
+.ipynb_checkpoints/
 .vscode/
 .idea/
 *.swp

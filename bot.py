@@ -12,6 +12,21 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
+# Server/channel restrictions (comma-separated IDs, empty = allow all)
+ALLOWED_GUILDS = [int(x.strip()) for x in os.getenv("ALLOWED_GUILDS", "").split(",") if x.strip()]
+ALLOWED_CHANNELS = [int(x.strip()) for x in os.getenv("ALLOWED_CHANNELS", "").split(",") if x.strip()]
+
+
+def is_allowed(guild_id: int | None, channel_id: int | None) -> bool:
+    """Check if the bot is allowed to respond in this guild/channel."""
+    # Check guild restriction
+    if ALLOWED_GUILDS and (guild_id is None or guild_id not in ALLOWED_GUILDS):
+        return False
+    # Check channel restriction
+    if ALLOWED_CHANNELS and (channel_id is None or channel_id not in ALLOWED_CHANNELS):
+        return False
+    return True
+
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -62,6 +77,11 @@ async def on_ready():
 async def on_message(message: discord.Message):
     # Ignore messages from the bot itself
     if message.author == bot.user:
+        return
+
+    # Check server/channel restrictions
+    guild_id = message.guild.id if message.guild else None
+    if not is_allowed(guild_id, message.channel.id):
         return
 
     # Check if message has image attachments with text -> edit mode
@@ -205,6 +225,12 @@ async def generate(
     cfg: float = 4.0,
     seed: int = None
 ):
+    guild_id = interaction.guild_id
+    channel_id = interaction.channel_id
+    if not is_allowed(guild_id, channel_id):
+        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        return
+
     await interaction.response.defer(thinking=True)
 
     try:
@@ -272,6 +298,12 @@ async def edit(
     cfg: float = 4.0,
     seed: int = None
 ):
+    guild_id = interaction.guild_id
+    channel_id = interaction.channel_id
+    if not is_allowed(guild_id, channel_id):
+        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        return
+
     await interaction.response.defer(thinking=True)
 
     # Validate attachment is an image
@@ -332,6 +364,12 @@ async def edit(
 @bot.tree.command(name="status", description="Check the status of a job")
 @app_commands.describe(job_id="The job ID to check")
 async def status(interaction: discord.Interaction, job_id: str):
+    guild_id = interaction.guild_id
+    channel_id = interaction.channel_id
+    if not is_allowed(guild_id, channel_id):
+        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        return
+
     await interaction.response.defer(ephemeral=True)
 
     try:
@@ -367,6 +405,12 @@ async def status(interaction: discord.Interaction, job_id: str):
 
 @bot.tree.command(name="queue", description="Show the current job queue status")
 async def queue(interaction: discord.Interaction):
+    guild_id = interaction.guild_id
+    channel_id = interaction.channel_id
+    if not is_allowed(guild_id, channel_id):
+        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        return
+
     await interaction.response.defer(ephemeral=True)
 
     try:
@@ -396,6 +440,12 @@ async def queue(interaction: discord.Interaction):
 
 @bot.tree.command(name="system", description="Show system information")
 async def system(interaction: discord.Interaction):
+    guild_id = interaction.guild_id
+    channel_id = interaction.channel_id
+    if not is_allowed(guild_id, channel_id):
+        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        return
+
     await interaction.response.defer(ephemeral=True)
 
     try:
