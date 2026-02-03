@@ -30,8 +30,8 @@ ALLOWED_CHANNELS = [int(x.strip()) for x in os.getenv("ALLOWED_CHANNELS", "").sp
 JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1000"))
 
 # Default inference steps for natural language commands
-DEFAULT_GENERATION_STEPS = int(os.getenv("DEFAULT_GENERATION_STEPS", "20"))
-DEFAULT_EDIT_STEPS = int(os.getenv("DEFAULT_EDIT_STEPS", "20"))
+DEFAULT_GENERATION_STEPS = int(os.getenv("DEFAULT_GENERATION_STEPS", "10"))
+DEFAULT_EDIT_STEPS = int(os.getenv("DEFAULT_EDIT_STEPS", "10"))
 
 # Log config on startup
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
@@ -156,13 +156,16 @@ async def on_message(message: discord.Message):
         except Exception as e:
             logger.warning(f"Failed to fetch referenced message: {e}")
 
-    # Check if message has image attachments with text -> edit mode
+    # Check if message has image attachments with text and mentions the bot -> edit mode
     image_attachments = [a for a in message.attachments if a.content_type and a.content_type.startswith("image/")]
 
-    if image_attachments and message.content.strip():
-        logger.info(f"Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={message.content.strip()[:50]}...")
-        await handle_edit_message(message, image_attachments, message.content.strip())
-        return
+    if image_attachments and message.content.strip() and bot.user.mentioned_in(message):
+        # Remove the bot mention from the prompt
+        prompt = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+        if prompt:
+            logger.info(f"Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={prompt[:50]}...")
+            await handle_edit_message(message, image_attachments, prompt)
+            return
 
     # Check for "draw [prompt]" pattern
     content_lower = message.content.lower().strip()
@@ -187,8 +190,8 @@ async def handle_generate_message(message: discord.Message, prompt: str):
             payload = {
                 "prompt": prompt,
                 "negative_prompt": "",
-                "width": 512,
-                "height": 512,
+                "width": 768,
+                "height": 768,
                 "num_inference_steps": DEFAULT_GENERATION_STEPS,
                 "cfg_scale": 4.0,
                 "seed": None
@@ -363,8 +366,8 @@ async def handle_reply_edit(message: discord.Message, attachments: list, prompt:
 @app_commands.describe(
     prompt="Description of the image to generate",
     negative_prompt="What to avoid in the image",
-    width="Image width (default: 512)",
-    height="Image height (default: 512)",
+    width="Image width (default: 1024)",
+    height="Image height (default: 1024)",
     steps="Number of inference steps (default: 8)",
     cfg="CFG scale (default: 4.0)",
     seed="Random seed for reproducibility"
@@ -373,8 +376,8 @@ async def generate(
     interaction: discord.Interaction,
     prompt: str,
     negative_prompt: str = "",
-    width: int = 512,
-    height: int = 512,
+    width: int = 1024,
+    height: int = 1024,
     steps: int = 8,
     cfg: float = 4.0,
     seed: int = None

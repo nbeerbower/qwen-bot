@@ -61,8 +61,8 @@ The bot will reply "Got it, I have enqueued your request" and ping you when done
 ### /generate options
 - `prompt` - Description of the image to generate (required)
 - `negative_prompt` - What to avoid
-- `width` - Image width (default: 512)
-- `height` - Image height (default: 512)
+- `width` - Image width (default: 1024)
+- `height` - Image height (default: 1024)
 - `steps` - Inference steps (default: 20)
 - `cfg` - CFG scale (default: 4.0)
 - `seed` - Random seed for reproducibility
