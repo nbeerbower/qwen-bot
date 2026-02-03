@@ -287,24 +287,28 @@ async def handle_generate_message(message: discord.Message, prompt: str):
 
 
 async def handle_edit_message(message: discord.Message, attachments: list, prompt: str):
-    """Handle natural language edit request."""
+    """Handle natural language edit request (supports multiple images with 2509/2511 models)."""
     # Reply to acknowledge
-    reply = await message.reply("Got it, I have enqueued your request.")
+    img_count = len(attachments)
+    ack_msg = f"Got it, I have enqueued your request with {img_count} image(s)." if img_count > 1 else "Got it, I have enqueued your request."
+    reply = await message.reply(ack_msg)
 
     try:
         async with aiohttp.ClientSession() as session:
-            # Use the first image attachment
-            attachment = attachments[0]
-            logger.debug(f"Downloading attachment: {attachment.filename} ({attachment.content_type})")
-            image_data = await attachment.read()
-            logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
-
-            # Resize image if needed to prevent OOM on server
-            image_data = resize_image_if_needed(image_data)
-
-            # Prepare multipart form data
+            # Prepare multipart form data with all images
             form = aiohttp.FormData()
-            form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
+
+            for attachment in attachments:
+                logger.debug(f"Downloading attachment: {attachment.filename} ({attachment.content_type})")
+                image_data = await attachment.read()
+                logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
+
+                # Resize image if needed to prevent OOM on server
+                image_data = resize_image_if_needed(image_data)
+
+                # Add each image with the same field name (multipart form supports repeated fields)
+                form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
+
             form.add_field("prompt", prompt)
             form.add_field("negative_prompt", "")
             form.add_field("num_inference_steps", str(DEFAULT_EDIT_STEPS))
@@ -354,24 +358,28 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
 
 
 async def handle_reply_edit(message: discord.Message, attachments: list, prompt: str):
-    """Handle edit request by replying to a bot-generated image."""
+    """Handle edit request by replying to a bot-generated image (supports multiple images with 2509/2511 models)."""
     # Reply to acknowledge
-    reply = await message.reply("Got it, I have enqueued your request.")
+    img_count = len(attachments)
+    ack_msg = f"Got it, I have enqueued your request with {img_count} image(s)." if img_count > 1 else "Got it, I have enqueued your request."
+    reply = await message.reply(ack_msg)
 
     try:
         async with aiohttp.ClientSession() as session:
-            # Download image from the bot's previous message attachment
-            attachment = attachments[0]
-            logger.debug(f"Downloading bot's previous image: {attachment.filename} ({attachment.content_type})")
-            image_data = await attachment.read()
-            logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
-
-            # Resize image if needed to prevent OOM on server
-            image_data = resize_image_if_needed(image_data)
-
-            # Prepare multipart form data
+            # Prepare multipart form data with all images from the referenced message
             form = aiohttp.FormData()
-            form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
+
+            for attachment in attachments:
+                logger.debug(f"Downloading bot's previous image: {attachment.filename} ({attachment.content_type})")
+                image_data = await attachment.read()
+                logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
+
+                # Resize image if needed to prevent OOM on server
+                image_data = resize_image_if_needed(image_data)
+
+                # Add each image with the same field name (multipart form supports repeated fields)
+                form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
+
             form.add_field("prompt", prompt)
             form.add_field("negative_prompt", "")
             form.add_field("num_inference_steps", str(DEFAULT_EDIT_STEPS))
