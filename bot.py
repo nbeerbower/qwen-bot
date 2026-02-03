@@ -131,6 +131,25 @@ async def on_message(message: discord.Message):
         logger.debug(f"Ignoring message from {message.author} in {guild_name}/#{channel_name} (not allowed)")
         return
 
+    # Check if this is a reply to a bot message with an image -> re-edit mode
+    if message.reference and message.content.strip():
+        try:
+            referenced_msg = await message.channel.fetch_message(message.reference.message_id)
+            if referenced_msg.author == bot.user:
+                # Check if the referenced message has an image attachment
+                ref_image_attachments = [
+                    a for a in referenced_msg.attachments
+                    if a.content_type and a.content_type.startswith("image/")
+                ]
+                if ref_image_attachments:
+                    logger.info(f"Re-edit request from {message.author} in {guild_name}/#{channel_name}: replying to bot message with {len(ref_image_attachments)} image(s), prompt={message.content.strip()[:50]}...")
+                    await handle_reply_edit(message, ref_image_attachments, message.content.strip())
+                    return
+        except discord.NotFound:
+            logger.debug(f"Referenced message not found for reply from {message.author}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch referenced message: {e}")
+
     # Check if message has image attachments with text -> edit mode
     image_attachments = [a for a in message.attachments if a.content_type and a.content_type.startswith("image/")]
 
@@ -264,6 +283,70 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
 
     except Exception as e:
         logger.error(f"Edit request failed for {message.author}: {e}", exc_info=True)
+        await message.channel.send(
+            content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
+            reference=message
+        )
+
+
+async def handle_reply_edit(message: discord.Message, attachments: list, prompt: str):
+    """Handle edit request by replying to a bot-generated image."""
+    # Reply to acknowledge
+    reply = await message.reply("Got it, I have enqueued your request.")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Download image from the bot's previous message attachment
+            attachment = attachments[0]
+            logger.debug(f"Downloading bot's previous image: {attachment.filename} ({attachment.content_type})")
+            image_data = await attachment.read()
+            logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
+
+            # Prepare multipart form data
+            form = aiohttp.FormData()
+            form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
+            form.add_field("prompt", prompt)
+            form.add_field("negative_prompt", "")
+            form.add_field("num_inference_steps", "8")
+            form.add_field("cfg_scale", "4.0")
+
+            logger.debug(f"Submitting re-edit job to API")
+            async with session.post(f"{API_BASE_URL}/edit", data=form) as resp:
+                if resp.status == 503:
+                    logger.warning("Edit pipeline unavailable (503)")
+                    await reply.edit(content="Sorry, the edit pipeline is not available right now.")
+                    return
+                if resp.status == 400:
+                    error_data = await resp.json()
+                    error_detail = error_data.get('detail', 'Unknown error')
+                    logger.warning(f"Re-edit request rejected (400): {error_detail}")
+                    await reply.edit(content=f"Invalid request: {error_detail}")
+                    return
+                if resp.status != 200:
+                    logger.error(f"Failed to submit re-edit job: HTTP {resp.status}")
+                    await reply.edit(content=f"Failed to submit job: {resp.status}")
+                    return
+                data = await resp.json()
+                job_id = data["job_id"]
+                logger.info(f"[{job_id}] Re-edit job submitted for user {message.author}")
+
+            # Poll for completion
+            result = await poll_job_status(session, job_id)
+
+            # Download and send image
+            output_data = await download_image(session, result["output_image_url"])
+            file = discord.File(BytesIO(output_data), filename="edited.png")
+
+            # Ping user with result
+            await message.channel.send(
+                content=f"{message.author.mention} Here's your edited image!",
+                file=file,
+                reference=message
+            )
+            logger.info(f"[{job_id}] Delivered re-edited image to {message.author}")
+
+    except Exception as e:
+        logger.error(f"Re-edit request failed for {message.author}: {e}", exc_info=True)
         await message.channel.send(
             content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
             reference=message
