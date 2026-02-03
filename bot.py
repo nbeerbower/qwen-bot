@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 from io import BytesIO
+from PIL import Image
 
 load_dotenv()
 
@@ -33,6 +34,9 @@ JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1000"))
 DEFAULT_GENERATION_STEPS = int(os.getenv("DEFAULT_GENERATION_STEPS", "10"))
 DEFAULT_EDIT_STEPS = int(os.getenv("DEFAULT_EDIT_STEPS", "10"))
 
+# Max image dimension (longest side) to prevent OOM on server
+MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "1024"))
+
 # Log config on startup
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
 logger.info(f"ALLOWED_GUILDS: {ALLOWED_GUILDS if ALLOWED_GUILDS else 'all'}")
@@ -40,6 +44,7 @@ logger.info(f"ALLOWED_CHANNELS: {ALLOWED_CHANNELS if ALLOWED_CHANNELS else 'all'
 logger.info(f"JOB_TIMEOUT: {JOB_TIMEOUT}s")
 logger.info(f"DEFAULT_GENERATION_STEPS: {DEFAULT_GENERATION_STEPS}")
 logger.info(f"DEFAULT_EDIT_STEPS: {DEFAULT_EDIT_STEPS}")
+logger.info(f"MAX_IMAGE_DIMENSION: {MAX_IMAGE_DIMENSION}")
 
 
 def is_allowed(guild_id: int | None, channel_id: int | None) -> bool:
@@ -116,6 +121,44 @@ async def download_image(session: aiohttp.ClientSession, image_url: str) -> byte
         data = await resp.read()
         logger.debug(f"Downloaded image: {len(data)} bytes")
         return data
+
+
+def resize_image_if_needed(image_data: bytes, max_dimension: int = None) -> bytes:
+    """Resize image if longest dimension exceeds max_dimension, preserving aspect ratio."""
+    if max_dimension is None:
+        max_dimension = MAX_IMAGE_DIMENSION
+
+    img = Image.open(BytesIO(image_data))
+    original_size = img.size
+    width, height = original_size
+
+    # Check if resize is needed
+    longest_side = max(width, height)
+    if longest_side <= max_dimension:
+        logger.debug(f"Image {width}x{height} within limit, no resize needed")
+        return image_data
+
+    # Calculate new dimensions preserving aspect ratio
+    scale = max_dimension / longest_side
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+
+    logger.info(f"Resizing image from {width}x{height} to {new_width}x{new_height}")
+
+    # Resize with high quality
+    img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    # Save to bytes, preserving format if possible
+    output = BytesIO()
+    img_format = img.format or "PNG"
+    if img_format.upper() == "JPEG":
+        img_resized.save(output, format=img_format, quality=95)
+    else:
+        img_resized.save(output, format=img_format)
+
+    result = output.getvalue()
+    logger.debug(f"Resized image: {len(image_data)} -> {len(result)} bytes")
+    return result
 
 
 @bot.event
@@ -256,6 +299,9 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
             image_data = await attachment.read()
             logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
 
+            # Resize image if needed to prevent OOM on server
+            image_data = resize_image_if_needed(image_data)
+
             # Prepare multipart form data
             form = aiohttp.FormData()
             form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
@@ -319,6 +365,9 @@ async def handle_reply_edit(message: discord.Message, attachments: list, prompt:
             logger.debug(f"Downloading bot's previous image: {attachment.filename} ({attachment.content_type})")
             image_data = await attachment.read()
             logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
+
+            # Resize image if needed to prevent OOM on server
+            image_data = resize_image_if_needed(image_data)
 
             # Prepare multipart form data
             form = aiohttp.FormData()
@@ -502,6 +551,9 @@ async def edit(
             logger.debug(f"Downloading attachment: {image.filename} ({image.content_type})")
             image_data = await image.read()
             logger.debug(f"Downloaded attachment: {len(image_data)} bytes")
+
+            # Resize image if needed to prevent OOM on server
+            image_data = resize_image_if_needed(image_data)
 
             # Prepare multipart form data
             form = aiohttp.FormData()
