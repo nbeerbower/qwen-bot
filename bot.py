@@ -26,10 +26,14 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 ALLOWED_GUILDS = [int(x.strip()) for x in os.getenv("ALLOWED_GUILDS", "").split(",") if x.strip()]
 ALLOWED_CHANNELS = [int(x.strip()) for x in os.getenv("ALLOWED_CHANNELS", "").split(",") if x.strip()]
 
+# Job timeout in seconds
+JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1000"))
+
 # Log config on startup
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
 logger.info(f"ALLOWED_GUILDS: {ALLOWED_GUILDS if ALLOWED_GUILDS else 'all'}")
 logger.info(f"ALLOWED_CHANNELS: {ALLOWED_CHANNELS if ALLOWED_CHANNELS else 'all'}")
+logger.info(f"JOB_TIMEOUT: {JOB_TIMEOUT}s")
 
 
 def is_allowed(guild_id: int | None, channel_id: int | None) -> bool:
@@ -50,7 +54,9 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-async def poll_job_status(session: aiohttp.ClientSession, job_id: str, timeout: int = 300) -> dict:
+async def poll_job_status(session: aiohttp.ClientSession, job_id: str, timeout: int = None) -> dict:
+    if timeout is None:
+        timeout = JOB_TIMEOUT
     """Poll for job completion with timeout."""
     logger.info(f"[{job_id}] Starting to poll job status (timeout={timeout}s)")
     start_time = asyncio.get_event_loop().time()
@@ -242,7 +248,7 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
                 logger.info(f"[{job_id}] Edit job submitted for user {message.author}")
 
             # Poll for completion
-            result = await poll_job_status(session, job_id, timeout=600)
+            result = await poll_job_status(session, job_id)
 
             # Download and send image
             output_data = await download_image(session, result["output_image_url"])
@@ -429,7 +435,7 @@ async def edit(
             await interaction.followup.send(f"Editing image... (Job ID: `{job_id}`)")
 
             # Poll for completion
-            result = await poll_job_status(session, job_id, timeout=600)
+            result = await poll_job_status(session, job_id)
 
             # Download and send image
             output_data = await download_image(session, result["output_image_url"])
