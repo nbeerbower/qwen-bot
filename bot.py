@@ -202,20 +202,31 @@ async def on_message(message: discord.Message):
         logger.debug(f"Ignoring message from {message.author} in {guild_name}/#{channel_name} (not allowed)")
         return
 
-    # Check if this is a reply to a bot message with an image -> re-edit mode
+    # Check if this is a reply to a message with an image -> edit mode
+    # For replies to bot messages: no mention needed (re-edit flow)
+    # For replies to other users' messages: require mention (or DM)
+    is_dm = guild_id is None
     if message.reference and message.content.strip():
         try:
             referenced_msg = await message.channel.fetch_message(message.reference.message_id)
-            if referenced_msg.author == bot.user:
-                # Check if the referenced message has an image attachment
-                ref_image_attachments = [
-                    a for a in referenced_msg.attachments
-                    if a.content_type and a.content_type.startswith("image/")
-                ]
-                if ref_image_attachments:
+            # Check if the referenced message has an image attachment
+            ref_image_attachments = [
+                a for a in referenced_msg.attachments
+                if a.content_type and a.content_type.startswith("image/")
+            ]
+            if ref_image_attachments:
+                # Reply to bot's message: no mention needed
+                if referenced_msg.author == bot.user:
                     logger.info(f"Re-edit request from {message.author} in {guild_name}/#{channel_name}: replying to bot message with {len(ref_image_attachments)} image(s), prompt={message.content.strip()[:50]}...")
                     await handle_reply_edit(message, ref_image_attachments, message.content.strip())
                     return
+                # Reply to any other message with image: require mention (or DM)
+                elif is_dm or bot.user.mentioned_in(message):
+                    prompt = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+                    if prompt:
+                        logger.info(f"Reply-edit request from {message.author} in {guild_name}/#{channel_name}: replying to {referenced_msg.author}'s message with {len(ref_image_attachments)} image(s), prompt={prompt[:50]}...")
+                        await handle_reply_edit(message, ref_image_attachments, prompt)
+                        return
         except discord.NotFound:
             logger.debug(f"Referenced message not found for reply from {message.author}")
         except Exception as e:
@@ -224,7 +235,6 @@ async def on_message(message: discord.Message):
     # Check if message has image attachments with text -> edit mode
     # In DMs, no need to tag the bot; in guilds, require a mention
     image_attachments = [a for a in message.attachments if a.content_type and a.content_type.startswith("image/")]
-    is_dm = guild_id is None
 
     if image_attachments and message.content.strip() and (is_dm or bot.user.mentioned_in(message)):
         # Remove the bot mention from the prompt (if present)
