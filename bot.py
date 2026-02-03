@@ -29,11 +29,17 @@ ALLOWED_CHANNELS = [int(x.strip()) for x in os.getenv("ALLOWED_CHANNELS", "").sp
 # Job timeout in seconds
 JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1000"))
 
+# Default inference steps for natural language commands
+DEFAULT_GENERATION_STEPS = int(os.getenv("DEFAULT_GENERATION_STEPS", "20"))
+DEFAULT_EDIT_STEPS = int(os.getenv("DEFAULT_EDIT_STEPS", "20"))
+
 # Log config on startup
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
 logger.info(f"ALLOWED_GUILDS: {ALLOWED_GUILDS if ALLOWED_GUILDS else 'all'}")
 logger.info(f"ALLOWED_CHANNELS: {ALLOWED_CHANNELS if ALLOWED_CHANNELS else 'all'}")
 logger.info(f"JOB_TIMEOUT: {JOB_TIMEOUT}s")
+logger.info(f"DEFAULT_GENERATION_STEPS: {DEFAULT_GENERATION_STEPS}")
+logger.info(f"DEFAULT_EDIT_STEPS: {DEFAULT_EDIT_STEPS}")
 
 
 def is_allowed(guild_id: int | None, channel_id: int | None) -> bool:
@@ -183,7 +189,7 @@ async def handle_generate_message(message: discord.Message, prompt: str):
                 "negative_prompt": "",
                 "width": 512,
                 "height": 512,
-                "num_inference_steps": 8,
+                "num_inference_steps": DEFAULT_GENERATION_STEPS,
                 "cfg_scale": 4.0,
                 "seed": None
             }
@@ -243,7 +249,7 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
             form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
             form.add_field("prompt", prompt)
             form.add_field("negative_prompt", "")
-            form.add_field("num_inference_steps", "8")
+            form.add_field("num_inference_steps", str(DEFAULT_EDIT_STEPS))
             form.add_field("cfg_scale", "4.0")
 
             logger.debug(f"Submitting edit job to API")
@@ -307,7 +313,7 @@ async def handle_reply_edit(message: discord.Message, attachments: list, prompt:
             form.add_field("images", image_data, filename=attachment.filename, content_type=attachment.content_type)
             form.add_field("prompt", prompt)
             form.add_field("negative_prompt", "")
-            form.add_field("num_inference_steps", "8")
+            form.add_field("num_inference_steps", str(DEFAULT_EDIT_STEPS))
             form.add_field("cfg_scale", "4.0")
 
             logger.debug(f"Submitting re-edit job to API")
