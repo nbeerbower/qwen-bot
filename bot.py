@@ -247,24 +247,19 @@ async def on_message(message: discord.Message):
             await handle_edit_message(message, image_attachments, prompt)
             return
 
-    # Check for "draw [prompt]" pattern
-    # In DMs, no need to tag the bot; in guilds, require a mention for draw command
+    # Check for "draw [prompt]" pattern - works without mention in both DMs and guilds
     content_lower = message.content.lower().strip()
-    # Remove bot mention for checking the pattern
-    content_for_check = content_lower.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
-
-    if content_for_check.startswith("draw "):
-        if is_dm or bot.user.mentioned_in(message):
-            prompt = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()[5:].strip()
-            if prompt:
-                # If image attachments present, treat as edit request
-                if image_attachments:
-                    logger.info(f"Draw+Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={prompt[:50]}...")
-                    await handle_edit_message(message, image_attachments, prompt)
-                else:
-                    logger.info(f"Draw request from {message.author} in {guild_name}/#{channel_name}: {prompt[:50]}...")
-                    await handle_generate_message(message, prompt)
-                return
+    if content_lower.startswith("draw "):
+        prompt = message.content.strip()[5:].strip()  # Get everything after "draw "
+        if prompt:
+            # If image attachments present, treat as edit request
+            if image_attachments:
+                logger.info(f"Draw+Edit request from {message.author} in {guild_name}/#{channel_name}: {len(image_attachments)} image(s), prompt={prompt[:50]}...")
+                await handle_edit_message(message, image_attachments, prompt)
+            else:
+                logger.info(f"Draw request from {message.author} in {guild_name}/#{channel_name}: {prompt[:50]}...")
+                await handle_generate_message(message, prompt)
+            return
 
     # Process other commands
     await bot.process_commands(message)
