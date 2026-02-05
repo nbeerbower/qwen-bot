@@ -261,6 +261,15 @@ async def on_message(message: discord.Message):
                 await handle_generate_message(message, prompt)
             return
 
+    # Check for bot mention with prompt (no "draw" prefix) -> generate
+    # In DMs, any text is treated as a prompt
+    if is_dm or bot.user.mentioned_in(message):
+        prompt = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+        if prompt:
+            logger.info(f"Mention request from {message.author} in {guild_name}/#{channel_name}: {prompt[:50]}...")
+            await handle_generate_message(message, prompt)
+            return
+
     # Process other commands
     await bot.process_commands(message)
 
