@@ -5,13 +5,17 @@ Provides English and Chinese translations for all user-facing strings,
 with per-user language preference storage and a helper function for lookups.
 """
 
+import os
+
 # Supported languages
 LANGUAGES = {
     "en": "English",
     "zh": "中文",
 }
 
-DEFAULT_LANGUAGE = "en"
+# Global default language, configurable via DEFAULT_LANGUAGE env var (en or zh)
+_env_lang = os.getenv("DEFAULT_LANGUAGE", "en").lower()
+DEFAULT_LANGUAGE = _env_lang if _env_lang in LANGUAGES else "en"
 
 # Per-user language preferences (user_id -> language code)
 _user_languages: dict[int, str] = {}
