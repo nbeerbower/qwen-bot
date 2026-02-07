@@ -6,11 +6,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from io import BytesIO
 from PIL import Image
 from translations import t, get_user_language, set_user_language, LANGUAGES
-
-load_dotenv()
 
 # Setup logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
