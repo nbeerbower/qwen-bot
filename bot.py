@@ -8,6 +8,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
+from translations import t, get_user_language, set_user_language, LANGUAGES
 
 load_dotenv()
 
@@ -276,8 +277,9 @@ async def on_message(message: discord.Message):
 
 async def handle_generate_message(message: discord.Message, prompt: str):
     """Handle natural language generation request."""
+    lang = get_user_language(message.author.id)
     # Reply to acknowledge
-    reply = await message.reply("Got it, I have enqueued your request.")
+    reply = await message.reply(t("enqueued", lang))
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -295,11 +297,11 @@ async def handle_generate_message(message: discord.Message, prompt: str):
             async with session.post(f"{API_BASE_URL}/generate", json=payload) as resp:
                 if resp.status == 503:
                     logger.warning("Generation pipeline unavailable (503)")
-                    await reply.edit(content="Sorry, the generation pipeline is not available right now.")
+                    await reply.edit(content=t("gen_pipeline_unavailable", lang))
                     return
                 if resp.status != 200:
                     logger.error(f"Failed to submit generate job: HTTP {resp.status}")
-                    await reply.edit(content=f"Failed to submit job: {resp.status}")
+                    await reply.edit(content=t("failed_submit_job", lang, status=resp.status))
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
@@ -314,7 +316,7 @@ async def handle_generate_message(message: discord.Message, prompt: str):
 
             # Ping user with result
             await message.channel.send(
-                content=f"{message.author.mention} Here's your image!",
+                content=f"{message.author.mention} {t('heres_your_image', lang)}",
                 file=file,
                 reference=message
             )
@@ -323,16 +325,17 @@ async def handle_generate_message(message: discord.Message, prompt: str):
     except Exception as e:
         logger.error(f"Generate request failed for {message.author}: {e}", exc_info=True)
         await message.channel.send(
-            content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
+            content=f"{message.author.mention} {t('something_went_wrong', lang, error=str(e))}",
             reference=message
         )
 
 
 async def handle_edit_message(message: discord.Message, attachments: list, prompt: str):
     """Handle natural language edit request (supports multiple images with 2509/2511 models)."""
+    lang = get_user_language(message.author.id)
     # Reply to acknowledge
     img_count = len(attachments)
-    ack_msg = f"Got it, I have enqueued your request with {img_count} image(s)." if img_count > 1 else "Got it, I have enqueued your request."
+    ack_msg = t("enqueued_multi", lang, img_count=img_count) if img_count > 1 else t("enqueued", lang)
     reply = await message.reply(ack_msg)
 
     try:
@@ -360,17 +363,17 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
             async with session.post(f"{API_BASE_URL}/edit", data=form) as resp:
                 if resp.status == 503:
                     logger.warning("Edit pipeline unavailable (503)")
-                    await reply.edit(content="Sorry, the edit pipeline is not available right now.")
+                    await reply.edit(content=t("edit_pipeline_unavailable", lang))
                     return
                 if resp.status == 400:
                     error_data = await resp.json()
                     error_detail = error_data.get('detail', 'Unknown error')
                     logger.warning(f"Edit request rejected (400): {error_detail}")
-                    await reply.edit(content=f"Invalid request: {error_detail}")
+                    await reply.edit(content=t("invalid_request", lang, detail=error_detail))
                     return
                 if resp.status != 200:
                     logger.error(f"Failed to submit edit job: HTTP {resp.status}")
-                    await reply.edit(content=f"Failed to submit job: {resp.status}")
+                    await reply.edit(content=t("failed_submit_job", lang, status=resp.status))
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
@@ -385,7 +388,7 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
 
             # Ping user with result
             await message.channel.send(
-                content=f"{message.author.mention} Here's your edited image!",
+                content=f"{message.author.mention} {t('heres_your_edited_image', lang)}",
                 file=file,
                 reference=message
             )
@@ -394,16 +397,17 @@ async def handle_edit_message(message: discord.Message, attachments: list, promp
     except Exception as e:
         logger.error(f"Edit request failed for {message.author}: {e}", exc_info=True)
         await message.channel.send(
-            content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
+            content=f"{message.author.mention} {t('something_went_wrong', lang, error=str(e))}",
             reference=message
         )
 
 
 async def handle_reply_edit(message: discord.Message, attachments: list, prompt: str):
     """Handle edit request by replying to a bot-generated image (supports multiple images with 2509/2511 models)."""
+    lang = get_user_language(message.author.id)
     # Reply to acknowledge
     img_count = len(attachments)
-    ack_msg = f"Got it, I have enqueued your request with {img_count} image(s)." if img_count > 1 else "Got it, I have enqueued your request."
+    ack_msg = t("enqueued_multi", lang, img_count=img_count) if img_count > 1 else t("enqueued", lang)
     reply = await message.reply(ack_msg)
 
     try:
@@ -431,17 +435,17 @@ async def handle_reply_edit(message: discord.Message, attachments: list, prompt:
             async with session.post(f"{API_BASE_URL}/edit", data=form) as resp:
                 if resp.status == 503:
                     logger.warning("Edit pipeline unavailable (503)")
-                    await reply.edit(content="Sorry, the edit pipeline is not available right now.")
+                    await reply.edit(content=t("edit_pipeline_unavailable", lang))
                     return
                 if resp.status == 400:
                     error_data = await resp.json()
                     error_detail = error_data.get('detail', 'Unknown error')
                     logger.warning(f"Re-edit request rejected (400): {error_detail}")
-                    await reply.edit(content=f"Invalid request: {error_detail}")
+                    await reply.edit(content=t("invalid_request", lang, detail=error_detail))
                     return
                 if resp.status != 200:
                     logger.error(f"Failed to submit re-edit job: HTTP {resp.status}")
-                    await reply.edit(content=f"Failed to submit job: {resp.status}")
+                    await reply.edit(content=t("failed_submit_job", lang, status=resp.status))
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
@@ -456,7 +460,7 @@ async def handle_reply_edit(message: discord.Message, attachments: list, prompt:
 
             # Ping user with result
             await message.channel.send(
-                content=f"{message.author.mention} Here's your edited image!",
+                content=f"{message.author.mention} {t('heres_your_edited_image', lang)}",
                 file=file,
                 reference=message
             )
@@ -465,7 +469,7 @@ async def handle_reply_edit(message: discord.Message, attachments: list, prompt:
     except Exception as e:
         logger.error(f"Re-edit request failed for {message.author}: {e}", exc_info=True)
         await message.channel.send(
-            content=f"{message.author.mention} Sorry, something went wrong: {str(e)}",
+            content=f"{message.author.mention} {t('something_went_wrong', lang, error=str(e))}",
             reference=message
         )
 
@@ -496,9 +500,10 @@ async def generate(
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
+    lang = get_user_language(user.id)
     if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/generate blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
-        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        await interaction.response.send_message(t("cmd_not_available", lang), ephemeral=True)
         return
 
     logger.info(f"/generate from {user} in {guild_name}/#{channel_name}: prompt={prompt[:50]}..., size={width}x{height}, steps={steps}")
@@ -521,17 +526,17 @@ async def generate(
             async with session.post(f"{API_BASE_URL}/generate", json=payload) as resp:
                 if resp.status == 503:
                     logger.warning(f"Generation pipeline unavailable (503) for {user}")
-                    await interaction.followup.send("Generation pipeline is not available.")
+                    await interaction.followup.send(t("gen_pipeline_not_available", lang))
                     return
                 if resp.status != 200:
                     logger.error(f"Failed to submit generate job: HTTP {resp.status}")
-                    await interaction.followup.send(f"Failed to submit job: {resp.status}")
+                    await interaction.followup.send(t("failed_submit_job", lang, status=resp.status))
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
                 logger.info(f"[{job_id}] Generate job submitted for {user}")
 
-            await interaction.followup.send(f"Generating image... (Job ID: `{job_id}`)")
+            await interaction.followup.send(t("generating_image", lang, job_id=job_id))
 
             # Poll for completion
             result = await poll_job_status(session, job_id)
@@ -540,13 +545,13 @@ async def generate(
             image_data = await download_image(session, result["output_image_url"])
             file = discord.File(BytesIO(image_data), filename="generated.png")
 
-            embed = discord.Embed(title="Generated Image", color=0x00ff00)
-            embed.add_field(name="Prompt", value=prompt[:1024], inline=False)
+            embed = discord.Embed(title=t("embed_generated_image", lang), color=0x00ff00)
+            embed.add_field(name=t("field_prompt", lang), value=prompt[:1024], inline=False)
             if negative_prompt:
-                embed.add_field(name="Negative Prompt", value=negative_prompt[:1024], inline=False)
-            embed.add_field(name="Size", value=f"{width}x{height}", inline=True)
-            embed.add_field(name="Steps", value=str(steps), inline=True)
-            embed.add_field(name="CFG", value=str(cfg), inline=True)
+                embed.add_field(name=t("field_negative_prompt", lang), value=negative_prompt[:1024], inline=False)
+            embed.add_field(name=t("field_size", lang), value=f"{width}x{height}", inline=True)
+            embed.add_field(name=t("field_steps", lang), value=str(steps), inline=True)
+            embed.add_field(name=t("field_cfg", lang), value=str(cfg), inline=True)
             embed.set_image(url="attachment://generated.png")
 
             await interaction.channel.send(embed=embed, file=file)
@@ -554,7 +559,7 @@ async def generate(
 
     except Exception as e:
         logger.error(f"/generate failed for {user}: {e}", exc_info=True)
-        await interaction.followup.send(f"Error: {str(e)}")
+        await interaction.followup.send(t("error", lang, error=str(e)))
 
 
 @bot.tree.command(name="edit", description="Edit an image using AI")
@@ -581,9 +586,10 @@ async def edit(
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
+    lang = get_user_language(user.id)
     if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/edit blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
-        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        await interaction.response.send_message(t("cmd_not_available", lang), ephemeral=True)
         return
 
     logger.info(f"/edit from {user} in {guild_name}/#{channel_name}: image={image.filename}, prompt={prompt[:50]}...")
@@ -592,7 +598,7 @@ async def edit(
     # Validate attachment is an image
     if not image.content_type or not image.content_type.startswith("image/"):
         logger.warning(f"/edit from {user}: invalid attachment type {image.content_type}")
-        await interaction.followup.send("Please attach a valid image file.")
+        await interaction.followup.send(t("attach_valid_image", lang))
         return
 
     try:
@@ -619,23 +625,23 @@ async def edit(
             async with session.post(f"{API_BASE_URL}/edit", data=form) as resp:
                 if resp.status == 503:
                     logger.warning(f"Edit pipeline unavailable (503) for {user}")
-                    await interaction.followup.send("Edit pipeline is not available.")
+                    await interaction.followup.send(t("edit_pipeline_not_available", lang))
                     return
                 if resp.status == 400:
                     error_data = await resp.json()
                     error_detail = error_data.get('detail', 'Unknown error')
                     logger.warning(f"/edit request rejected (400) for {user}: {error_detail}")
-                    await interaction.followup.send(f"Invalid request: {error_detail}")
+                    await interaction.followup.send(t("invalid_request", lang, detail=error_detail))
                     return
                 if resp.status != 200:
                     logger.error(f"Failed to submit edit job: HTTP {resp.status}")
-                    await interaction.followup.send(f"Failed to submit job: {resp.status}")
+                    await interaction.followup.send(t("failed_submit_job", lang, status=resp.status))
                     return
                 data = await resp.json()
                 job_id = data["job_id"]
                 logger.info(f"[{job_id}] Edit job submitted for {user}")
 
-            await interaction.followup.send(f"Editing image... (Job ID: `{job_id}`)")
+            await interaction.followup.send(t("editing_image", lang, job_id=job_id))
 
             # Poll for completion
             result = await poll_job_status(session, job_id)
@@ -644,10 +650,10 @@ async def edit(
             output_data = await download_image(session, result["output_image_url"])
             file = discord.File(BytesIO(output_data), filename="edited.png")
 
-            embed = discord.Embed(title="Edited Image", color=0x0099ff)
-            embed.add_field(name="Edit Instructions", value=prompt[:1024], inline=False)
-            embed.add_field(name="Steps", value=str(steps), inline=True)
-            embed.add_field(name="CFG", value=str(cfg), inline=True)
+            embed = discord.Embed(title=t("embed_edited_image", lang), color=0x0099ff)
+            embed.add_field(name=t("field_edit_instructions", lang), value=prompt[:1024], inline=False)
+            embed.add_field(name=t("field_steps", lang), value=str(steps), inline=True)
+            embed.add_field(name=t("field_cfg", lang), value=str(cfg), inline=True)
             embed.set_image(url="attachment://edited.png")
 
             await interaction.channel.send(embed=embed, file=file)
@@ -655,7 +661,7 @@ async def edit(
 
     except Exception as e:
         logger.error(f"/edit failed for {user}: {e}", exc_info=True)
-        await interaction.followup.send(f"Error: {str(e)}")
+        await interaction.followup.send(t("error", lang, error=str(e)))
 
 
 @bot.tree.command(name="status", description="Check the status of a job")
@@ -667,9 +673,10 @@ async def status(interaction: discord.Interaction, job_id: str):
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
+    lang = get_user_language(user.id)
     if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/status blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
-        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        await interaction.response.send_message(t("cmd_not_available", lang), ephemeral=True)
         return
 
     logger.info(f"/status from {user}: job_id={job_id}")
@@ -680,34 +687,34 @@ async def status(interaction: discord.Interaction, job_id: str):
             async with session.get(f"{API_BASE_URL}/status/{job_id}") as resp:
                 if resp.status == 404:
                     logger.debug(f"/status: job {job_id} not found")
-                    await interaction.followup.send("Job not found.", ephemeral=True)
+                    await interaction.followup.send(t("job_not_found", lang), ephemeral=True)
                     return
                 if resp.status != 200:
                     logger.error(f"/status: failed to get job {job_id}: HTTP {resp.status}")
-                    await interaction.followup.send(f"Failed to get status: {resp.status}", ephemeral=True)
+                    await interaction.followup.send(t("failed_get_status", lang, status=resp.status), ephemeral=True)
                     return
                 data = await resp.json()
                 logger.debug(f"/status: job {job_id} status={data['status']}")
 
-        embed = discord.Embed(title=f"Job Status: {job_id[:8]}...", color=0xffaa00)
-        embed.add_field(name="Type", value=data.get("job_type", "unknown"), inline=True)
-        embed.add_field(name="Status", value=data["status"], inline=True)
+        embed = discord.Embed(title=t("embed_job_status", lang, job_id=job_id[:8]), color=0xffaa00)
+        embed.add_field(name=t("field_type", lang), value=data.get("job_type", "unknown"), inline=True)
+        embed.add_field(name=t("field_status", lang), value=data["status"], inline=True)
 
         if data.get("progress") is not None:
             progress_pct = int(data["progress"] * 100)
-            embed.add_field(name="Progress", value=f"{progress_pct}%", inline=True)
+            embed.add_field(name=t("field_progress", lang), value=f"{progress_pct}%", inline=True)
 
         if data.get("prompt"):
-            embed.add_field(name="Prompt", value=data["prompt"][:1024], inline=False)
+            embed.add_field(name=t("field_prompt", lang), value=data["prompt"][:1024], inline=False)
 
         if data.get("error"):
-            embed.add_field(name="Error", value=data["error"][:1024], inline=False)
+            embed.add_field(name=t("field_error", lang), value=data["error"][:1024], inline=False)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
         logger.error(f"/status failed for {user}: {e}", exc_info=True)
-        await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(t("error", lang, error=str(e)), ephemeral=True)
 
 
 @bot.tree.command(name="queue", description="Show the current job queue status")
@@ -718,9 +725,10 @@ async def queue(interaction: discord.Interaction):
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
+    lang = get_user_language(user.id)
     if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/queue blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
-        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        await interaction.response.send_message(t("cmd_not_available", lang), ephemeral=True)
         return
 
     logger.info(f"/queue from {user} in {guild_name}/#{channel_name}")
@@ -731,27 +739,27 @@ async def queue(interaction: discord.Interaction):
             async with session.get(f"{API_BASE_URL}/queue") as resp:
                 if resp.status != 200:
                     logger.error(f"/queue: failed to get queue info: HTTP {resp.status}")
-                    await interaction.followup.send(f"Failed to get queue info: {resp.status}", ephemeral=True)
+                    await interaction.followup.send(t("failed_get_queue", lang, status=resp.status), ephemeral=True)
                     return
                 data = await resp.json()
                 logger.debug(f"/queue: queue_size={data.get('queue_size')}, total={data.get('total_jobs')}")
 
-        embed = discord.Embed(title="Queue Status", color=0x9900ff)
-        embed.add_field(name="Queue Size", value=str(data.get("queue_size", 0)), inline=True)
-        embed.add_field(name="Total Jobs", value=str(data.get("total_jobs", 0)), inline=True)
-        embed.add_field(name="Completed", value=str(data.get("completed_jobs", 0)), inline=True)
-        embed.add_field(name="Failed", value=str(data.get("failed_jobs", 0)), inline=True)
-        embed.add_field(name="Generation Jobs", value=str(data.get("generation_jobs", 0)), inline=True)
-        embed.add_field(name="Edit Jobs", value=str(data.get("edit_jobs", 0)), inline=True)
+        embed = discord.Embed(title=t("embed_queue_status", lang), color=0x9900ff)
+        embed.add_field(name=t("field_queue_size", lang), value=str(data.get("queue_size", 0)), inline=True)
+        embed.add_field(name=t("field_total_jobs", lang), value=str(data.get("total_jobs", 0)), inline=True)
+        embed.add_field(name=t("field_completed", lang), value=str(data.get("completed_jobs", 0)), inline=True)
+        embed.add_field(name=t("field_failed", lang), value=str(data.get("failed_jobs", 0)), inline=True)
+        embed.add_field(name=t("field_generation_jobs", lang), value=str(data.get("generation_jobs", 0)), inline=True)
+        embed.add_field(name=t("field_edit_jobs", lang), value=str(data.get("edit_jobs", 0)), inline=True)
 
         if data.get("current_job"):
-            embed.add_field(name="Current Job", value=f"`{data['current_job'][:8]}...`", inline=False)
+            embed.add_field(name=t("field_current_job", lang), value=f"`{data['current_job'][:8]}...`", inline=False)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
         logger.error(f"/queue failed for {user}: {e}", exc_info=True)
-        await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(t("error", lang, error=str(e)), ephemeral=True)
 
 
 @bot.tree.command(name="system", description="Show system information")
@@ -762,9 +770,10 @@ async def system(interaction: discord.Interaction):
 
     guild_id = interaction.guild_id
     channel_id = interaction.channel_id
+    lang = get_user_language(user.id)
     if not is_allowed(guild_id, channel_id, user.id):
         logger.info(f"/system blocked for {user} in {guild_name}/#{channel_name} (not allowed)")
-        await interaction.response.send_message("This command is not available here.", ephemeral=True)
+        await interaction.response.send_message(t("cmd_not_available", lang), ephemeral=True)
         return
 
     logger.info(f"/system from {user} in {guild_name}/#{channel_name}")
@@ -775,32 +784,57 @@ async def system(interaction: discord.Interaction):
             async with session.get(f"{API_BASE_URL}/system/info") as resp:
                 if resp.status != 200:
                     logger.error(f"/system: failed to get system info: HTTP {resp.status}")
-                    await interaction.followup.send(f"Failed to get system info: {resp.status}", ephemeral=True)
+                    await interaction.followup.send(t("failed_get_system", lang, status=resp.status), ephemeral=True)
                     return
                 data = await resp.json()
                 logger.debug(f"/system: device={data.get('device')}, gpu={data.get('gpu_name')}")
 
-        embed = discord.Embed(title="System Information", color=0x00ffaa)
-        embed.add_field(name="Device", value=data.get("device", "unknown"), inline=True)
-        embed.add_field(name="CUDA Available", value=str(data.get("cuda_available", False)), inline=True)
-        embed.add_field(name="Quantization", value=str(data.get("quantization", False)), inline=True)
+        embed = discord.Embed(title=t("embed_system_info", lang), color=0x00ffaa)
+        embed.add_field(name=t("field_device", lang), value=data.get("device", "unknown"), inline=True)
+        embed.add_field(name=t("field_cuda_available", lang), value=str(data.get("cuda_available", False)), inline=True)
+        embed.add_field(name=t("field_quantization", lang), value=str(data.get("quantization", False)), inline=True)
 
         if data.get("gpu_name"):
-            embed.add_field(name="GPU", value=data["gpu_name"], inline=False)
+            embed.add_field(name=t("field_gpu", lang), value=data["gpu_name"], inline=False)
 
         if data.get("gpu_memory_allocated"):
-            embed.add_field(name="Memory Allocated", value=data["gpu_memory_allocated"], inline=True)
+            embed.add_field(name=t("field_memory_allocated", lang), value=data["gpu_memory_allocated"], inline=True)
         if data.get("gpu_memory_total"):
-            embed.add_field(name="Memory Total", value=data["gpu_memory_total"], inline=True)
+            embed.add_field(name=t("field_memory_total", lang), value=data["gpu_memory_total"], inline=True)
 
-        embed.add_field(name="Generation Pipeline", value=data.get("generation_pipeline", "not loaded"), inline=True)
-        embed.add_field(name="Edit Pipeline", value=data.get("edit_pipeline", "not loaded"), inline=True)
+        embed.add_field(name=t("field_gen_pipeline", lang), value=data.get("generation_pipeline", t("not_loaded", lang)), inline=True)
+        embed.add_field(name=t("field_edit_pipeline", lang), value=data.get("edit_pipeline", t("not_loaded", lang)), inline=True)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
         logger.error(f"/system failed for {user}: {e}", exc_info=True)
-        await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(t("error", lang, error=str(e)), ephemeral=True)
+
+
+@bot.tree.command(name="language", description="Switch language / 切换语言")
+@app_commands.describe(lang="Language: en (English) or zh (中文)")
+@app_commands.choices(lang=[
+    app_commands.Choice(name="English", value="en"),
+    app_commands.Choice(name="中文 (Chinese)", value="zh"),
+])
+async def language(interaction: discord.Interaction, lang: app_commands.Choice[str] = None):
+    user = interaction.user
+    current_lang = get_user_language(user.id)
+
+    if lang is None:
+        # Show current language
+        lang_name = LANGUAGES.get(current_lang, current_lang)
+        await interaction.response.send_message(
+            t("language_current", current_lang, lang_name=lang_name),
+            ephemeral=True
+        )
+        return
+
+    new_lang = lang.value
+    set_user_language(user.id, new_lang)
+    logger.info(f"/language: {user} switched to {new_lang}")
+    await interaction.response.send_message(t("language_set", new_lang), ephemeral=True)
 
 
 if __name__ == "__main__":
